@@ -1,0 +1,155 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: wowza
+  namespace: default
+spec:
+  volumeName: wowza
+  storageClassName: local-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+ name: wowza
+spec:
+ capacity:
+   storage: 100Gi
+ accessModes:
+ - ReadWriteOnce
+ persistentVolumeReclaimPolicy: Retain
+ storageClassName: local-storage
+ local:
+   path: /your/server/storage/path
+ nodeAffinity:
+   required:
+     nodeSelectorTerms:
+     - matchExpressions:
+       - key: kubernetes.io/hostname
+         operator: In
+         values:
+         - your-server-hostname
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wowza
+  labels:
+    app: wowza
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wowza
+  template:
+    metadata:
+      labels:
+        app: wowza
+    spec:
+      containers:
+      - name: wowza
+        resources:
+          limits:
+            memory: 2048Mi
+          requests:
+            memory: 1028Mi
+        image: your-image-registry/your-docker-wowza-image
+        volumeMounts:
+        - mountPath: /usr/local/WowzaStreamingEngine/data
+          name: wowza
+      imagePullSecrets:
+        - name: needed-if-private-registry
+      volumes:
+        - name: wowza
+          persistentVolumeClaim:
+            claimName: wowza
+      nodeSelector:
+        kubernetes.io/hostname: your-server-hostname
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wowza
+spec:
+  selector:
+    app: wowza
+  ports:
+    - port: 8086
+      targetPort: 8086
+      protocol: TCP
+      name: tcp2
+    - port: 8087
+      targetPort: 8087
+      protocol: TCP
+      name: tcp3
+    - port: 8088
+      targetPort: 8088
+      protocol: TCP
+      name: tcp4
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: tcp5
+    # - port: 1935 # RTMP/RTMPT/RTMPE/RTSP(interleaved)
+    #   targetPort: 1935
+    #   protocol: TCP
+    #   name: rtmps
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wowza-rtmps
+spec:
+  type: NodePort
+  selector:
+    app: wowza
+  ports:
+    - port: 1935 # RTMP/RTMPT/RTMPE/RTSP(interleaved)
+      targetPort: 1935
+      protocol: TCP
+      name: rtmp
+---   
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: wowza
+  annotations:
+        kubernetes.io/tls-acme: 'true'
+spec:
+  tls:
+    - hosts:
+        - wowza.your-domain.com
+      secretName: wowza-tls
+  rules:
+    - host: wowza.your-domain.com
+      http:
+        paths:
+        - path: /
+          backend:
+            serviceName: wowza
+            servicePort: 8088
+#        - path: /8088
+#          backend:
+#            serviceName: wowza
+#            servicePort: 8088
+#        - path: /8087
+#          backend:
+#            serviceName: wowza
+#            servicePort: 8087
+        - path: /8086
+          backend:
+            serviceName: wowza
+            servicePort: 8086
+        # - path: /1935
+        #   backend:
+        #     serviceName: wowza
+        #     servicePort: 1935
+        # - path: /80
+        #   backend:
+        #     serviceName: wowza
+        #     servicePort: 80
